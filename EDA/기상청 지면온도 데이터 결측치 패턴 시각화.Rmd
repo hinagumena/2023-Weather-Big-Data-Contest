@@ -1,0 +1,693 @@
+---
+title: "데이터 결측치 시각화"
+author: "서희나"
+date: "2023-06-17"
+output: html_document
+---
+
+## 데이터 1차 전처리 
+
+```{r}
+pacman::p_load(tidyverse, 
+               mice,
+               rms,
+               finalfit,
+               e1071,
+               bestNormalize,
+               moments,
+               data.table,
+               lattice,
+               car,
+               princurve,
+               kernlab,
+               mlbench,
+               CORElearn,
+               mvtnorm,
+               caret,
+               SIS,
+               minerva,
+               corrplot,
+               pROC,
+               MASS,
+               smotefamily,
+               ebmc)
+```
+
+```{r}
+train<-read.csv('C:/Users/shn20/Desktop/FILES/기상청/지면온도 데이터/surface_tp_train.csv')
+test<-read.csv('C:/Users/shn20/Desktop/FILES/기상청/지면온도 데이터/surface_tp_test.csv')
+```
+
+```{r}
+na_convert<-function(x){
+  na_index<-which(x %in% c(-99,-99.9,-999))
+  x[na_index]<-NA
+  return(x)}
+
+
+train %<>% 
+  mutate_all(na_convert) %>%
+  
+  dplyr::select(-c('...1','X')) %>% 
+  
+  rename('지점번호'='surface_tp_train.stn',
+         '년도'='surface_tp_train.year',
+         '월일시간'='surface_tp_train.mmddhh',
+         '평균기온'='surface_tp_train.ta',
+         '평균이슬점온도'='surface_tp_train.td',
+         '평균상대습도'='surface_tp_train.hm',
+         '평균풍속'='surface_tp_train.ws',
+         '누적강수량'='surface_tp_train.rn',
+         '누적강수유무'='surface_tp_train.re',
+         '현천계현천'='surface_tp_train.ww',
+         '지면온도'='surface_tp_train.ts',
+         '누적일사량'='surface_tp_train.si',
+         '누적일조량'='surface_tp_train.ss',
+         '적설깊이'='surface_tp_train.sn') %>%
+  
+  mutate('시간'=월일시간%>% str_sub(.,start=-2),
+         '일' = 월일시간 %>% str_sub(.,start=-4,end=-3),
+         '월' = 월일시간 %>% str_sub(.,end=-5)) %>% 
+  
+  mutate(현천계현천=
+           dplyr::recode(현천계현천,
+                  "C"="맑음",
+                  "F"="안개",
+                  "G"="연무",
+                  "H"="박무",
+                  "R"="비",
+                  "S"="눈",
+                  "X"="모름")) %>% 
+  
+  dplyr::select(-월일시간) %>% 
+  mutate_if(is.character,as.factor) %>% 
+  mutate_at(vars(지점번호),as.factor)
+  
+test %<>% 
+  mutate_all(na_convert) %>% 
+  
+  dplyr::select(-X) %>% 
+  
+  rename('지점번호'='surface_tp_test.stn',
+         '년도'='surface_tp_test.year',
+         '월일시간'='surface_tp_test.mmddhh',
+         '평균기온'='surface_tp_test.ta',
+         '평균이슬점온도'='surface_tp_test.td',
+         '평균상대습도'='surface_tp_test.hm',
+         '평균풍속'='surface_tp_test.ws',
+         '누적강수량'='surface_tp_test.rn',
+         '누적강수유무'='surface_tp_test.re',
+         '현천계현천'='surface_tp_test.ww',
+         '누적일사량'='surface_tp_test.si',
+         '누적일조량'='surface_tp_test.ss',
+         '적설깊이'='surface_tp_test.sn') %>% 
+  
+  mutate('시간'=월일시간%>% str_sub(.,start=-2),
+         '일' = 월일시간 %>% str_sub(.,start=-4,end=-3),
+         '월' = 월일시간 %>% str_sub(.,end=-5)) %>% 
+  
+  mutate(현천계현천=
+           dplyr::recode(현천계현천,
+                         "C"="맑음",
+                         "F"="안개",
+                         "G"="연무",
+                         "H"="박무",
+                         "R"="비",
+                         "S"="눈",
+                         "X"="모름")) %>% 
+  
+  dplyr::select(-월일시간) %>% 
+  mutate_if(is.character,as.factor) %>% 
+  mutate_at(vars(지점번호),as.factor)
+```
+
+## 추후 제거해야할 인덱스- y값에 결측 
+
+```{r}
+target_na<-which(train$지면온도 %>% is.na)
+```
+
+## mice 돌리기 앞서 2차 전처리 
+
+```{r}
+na_zero<-function(x){
+  na_index<-which(is.na(x))
+  x[na_index]<-0
+  return(x)}
+```
+
+```{r}
+library(lubridate)
+```
+
+```{r}
+train %>% 
+  mutate_at(vars(누적일사량,누적일조량,적설깊이),na_zero) %>%  
+  mutate_at(vars(년도),as.numeric) %>% 
+  unite(년도,월,일,sep='-',col='time',remove=T) %>%
+  mutate(time=as.Date(time)) %>% 
+  unite(time,시간,sep=' ',col='time') %>% 
+  mutate(time=ymd_h(time)) -> train2
+
+test %>% 
+  mutate_at(vars(누적일사량,누적일조량,적설깊이),na_zero) %>%  
+  mutate_at(vars(년도),as.numeric) %>% 
+  unite(년도,월,일,sep='-',col='time',remove=T) %>%
+  mutate(time=as.Date(time)) %>% 
+  unite(time,시간,sep=' ',col='time') %>% 
+  mutate(time=ymd_h(time))->test2
+```
+
+```{r}
+colnames(train2) %>% length
+```
+
+## 3차 전처리 (변수 선택)
+
+```{r}
+train3<-train2 %>% na.omit %>% 
+  dplyr::select(-c(지점번호,time))
+```
+
+
+
+```{r}
+# summary(train)
+```
+
+```{r}
+train %>% is.na %>% colSums %>% data.frame-> na_train 
+test  %>% is.na %>% colSums %>% data.frame 
+
+na_train$ratio<-na_train$./nrow(train) ;na_train
+```
+```{r}
+library(naniar)
+vis_miss(train,warn_large_data = F)
+vis_miss(test,warn_large_data = F)
+gg_miss_upset(train)
+```
+
+
+결측치 패턴 파악을 위한 시각화 함수 
+
+```{r}
+lplot<-function(vars){
+                ggplot(data=na_var,aes_string(x={{vars}},color='isna'))+
+                  geom_line(stat='density',size=2)+
+                  scale_color_brewer(palette='Pastel1')+
+                  theme_classic()}
+
+bplot<-function(vars){
+                ggplot(data=na_var,aes_string(x={{vars}},fill='isna'))+
+                  geom_bar(position='dodge')+
+                  scale_fill_brewer(palette='Pastel1')+
+                  theme_classic()}
+```
+
+```{r}
+train %>% dplyr::select_if(is.numeric) %>% colnames %>% unlist->numeric
+
+train %>% 
+  dplyr::select_if(is.factor) %>% 
+  colnames %>% unlist->cate
+```
+
+
+
+## 평균기온 
+
+```{r }
+library(gridExtra)
+
+# 평균기온에 결측치 패턴이 있나
+
+train %>% mutate(isna=is.na(평균기온) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{}
+평균기온에 빵꾸가 나면 평균 이슬점온도에도 빵꾸가 난다.
+→ 우선적으로 평균기온을 먼저 보간해주고 이슬점 온도 관련해서 보간을 진행할 것이다. 
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+연속된 값에서 결측이 발생하긴 함 
+
+## 평균이슬점 
+
+```{r}
+# 평균이슬점 온도에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(평균이슬점온도) %>% as.factor)-> na_var
+
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 평균 상대습도 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 평균 상대 습도에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(평균상대습도) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 평균 풍속  
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 평균 풍속에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(평균풍속) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+```
+
+## 누적 강수량 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 누적 강수량에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(누적강수량) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+```
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 누적 강수 유무 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 누적 강수 유무에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(누적강수유무) %>% as.factor)-> na_var
+
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 지면온도 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 지면온도에 결측치 패턴이 있나 
+
+train %>% mutate(isna=is.na(지면온도) %>% as.factor)-> na_var
+```
+
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 누적 일사량 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 누적 일사량에 결측치 패턴이 있나  
+
+train %>% mutate(isna=is.na(누적일사량) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(시간) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(월) %>% 
+  table %>% barplot 
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+```{}
+주로 밤 시간에 NA 발생 -> 0으로 결측치 대체 
+```
+
+## 누적 일조량 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 누적 일조량에 결측치 패턴이 있나  
+
+train %>% mutate(isna=is.na(누적일조량) %>% as.factor)-> na_var
+```
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(시간) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(월) %>% 
+  table %>% barplot 
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+## 적설 깊이 
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+# 적설 깊이에 결측치 패턴이 있나
+
+train %>% mutate(isna=is.na(적설깊이) %>% as.factor)-> na_var
+```
+
+
+```{r warning = FALSE, message = FALSE, fig.width=8, fig.height=8}
+plots<-lapply(numeric,
+              function(vars)lplot(vars))
+
+grid.arrange(grobs=plots,ncol=2)
+
+plots2<-lapply(cate,
+              function(vars)bplot(vars))
+
+grid.arrange(grobs=plots2,ncol=2)
+```
+
+```{r}
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(현천계현천) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(시간) %>% 
+  table %>% barplot
+
+na_var %>% 
+  filter(isna=='FALSE') %>% 
+  dplyr::select(월) %>% 
+  table %>% barplot 
+```
+
+```{r}
+n<-20
+na_var %>% 
+  filter(isna=='TRUE') %>% 
+  dplyr::select(년도,월,일,시간) %>% 
+  head(n)
+```
+
+```{r}
+model<-aov(지면온도~지점번호*년도,data=train)
+summary(model)
+```
+
+
+## 변수간 상관계수 시각화 
+
+1. 수치형 변수의 선형 관계 파악 
+
+```{r warning=F,message=F}
+num<-c('평균기온','평균이슬점온도','평균상대습도','평균풍속','누적강수량',
+       '누적강수유무','지면온도','누적일사량','누적일조량','적설깊이')
+
+cor(train2 %>% dplyr::select(all_of(num)),use='pairwise.complete.obs') %>% 
+  round(.,2) %>% 
+  melt %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +
+  geom_text(aes(Var2, Var1, label = value), size = 5) +
+  scale_fill_gradient2(low = "blue", high = "red",
+                       limit = c(-1,1), name="Correlation") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x=element_text(angle=25,size=8))
+  
+```
+
+2. 비모수적 상관관계 스피어만 
+
+```{r}
+cor(train2 %>% dplyr::select(all_of(num)),use='pairwise.complete.obs',
+    method='spearman') %>% 
+  round(.,2) %>% 
+  melt %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +
+  geom_text(aes(Var2, Var1, label = value), size = 5) +
+  scale_fill_gradient2(low = "blue", high = "red",
+                       limit = c(-1,1), name="Correlation") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x=element_text(angle=25))
+  
+```
+
+3. Crammer's V 
+
+```{r}
+require(vcd)
+```
+
+```{r}
+cramers_v<-function(x){
+  
+  result<-c()
+  
+  for(i in cate){
+    cross_tab <- table(train[,x], train[,i])
+    cramers_v_score <- assocstats(cross_tab)$cramer
+
+    result<-c(result,cramers_v_score)}
+  
+  return(result)}
+```
+
+```{r}
+sapply(cate,function(x)cramers_v(x)) %>% round(.,4)-> cramer
+rownames(cramer)<-cate 
+
+cramer %>% 
+  melt %>% 
+  ggplot(aes(x=Var1, y=Var2, fill=value)) + 
+  geom_tile() +
+  geom_text(aes(Var2, Var1, label = value), size = 5) +
+  scale_fill_gradient2(low = "blue", high = "red",
+                       limit = c(-1,1), name="범주 간 연관성") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x=element_text(angle=25))
+```
+
+
+```{}
+write.csv(file='지면온도train.csv',train2)
+write.csv(file='지면온도test.csv',test2)
+```
+
+
+ 
+
