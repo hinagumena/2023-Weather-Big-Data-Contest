@@ -1,8 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[ ]:
-
 
 import pandas as pd
 import numpy as np
@@ -13,8 +8,6 @@ warnings.filterwarnings('ignore')
 
 
 # # 데이터 결측치 시각화 
-
-# In[ ]:
 
 
 # 데이터 읽어오기
@@ -37,20 +30,12 @@ msno.matrix(train)
 msno.matrix(test)
 
 
-# In[ ]:
-
-
 msno.dendrogram(train)
 msno.bar(train)
 
 
-# # 데이터 분포 시각화 1
-
-# In[ ]:
-
-
-train=pd.read_csv("C:/Users/shn20/Desktop/FILES/기상청/지면온도 데이터/지면온도train.csv")
-test=pd.read_csv("C:/Users/shn20/Desktop/FILES/기상청/지면온도 데이터/지면온도test.csv")
+train=pd.read_csv("지면온도train.csv")
+test=pd.read_csv("지면온도test.csv")
 
 train=train.drop(['Unnamed: 0'],axis=1)
 test=test.drop(['Unnamed: 0'],axis=1)
@@ -64,10 +49,6 @@ print(numeric)
 numeric=numeric.to_list()
 numeric.remove('지면온도')
 print(numeric)
-
-
-# In[ ]:
-
 
 # 데이터 읽어오기
 
@@ -143,17 +124,11 @@ class data_preprocessing():
       return self.remove_columns_test() ## train에서 제거되는 행으로 제거
 
 
-# In[ ]:
-
-
 dp= data_preprocessing(data_train, data_test)
 result_train = dp.result('train')
 result_train
 result_test = dp.result("test")
 result_test
-
-
-# In[ ]:
 
 
 # result_train['hh'] = result_train['surface_tp_train.mmddhh'].astype(int).astype(str).str[-2:]
@@ -224,9 +199,6 @@ def change_to_category(data, columns_name):
   return data
 
 
-# In[ ]:
-
-
 ## int -> category 변경
 def change_to_category(data, columns_name):
   data[columns_name] = data[columns_name].astype(str).astype('category')
@@ -238,9 +210,6 @@ def category_changing(data):
       data = change_to_category(data, column)
 
   return data
-
-
-# In[ ]:
 
 
 train = category_changing(result_train)
@@ -264,9 +233,6 @@ import seaborn as sns
 cat = ["stn", "year",  "re", "ww", 'mmddhh']
 list_all = train.columns.to_list()
 numeric = list(set(list_all) - set(cat))
-
-
-# In[ ]:
 
 
 def plot_numeric_variables(df, columns):
@@ -294,9 +260,6 @@ def plot_numeric_variables(df, columns):
     plt.show()
 
 plot_numeric_variables(train, numeric)
-
-
-# In[ ]:
 
 
 def plot_categorical_variables(df, columns):
@@ -338,9 +301,6 @@ plot_categorical_variables(train, ["stn", "year",  "re", "ww"])
 
 # # 데이터 분포 시각화 2
 
-# In[ ]:
-
-
 # set module
 import pandas as pd
 import matplotlib 
@@ -361,9 +321,6 @@ new_dir = "C:/Users/subin/OneDrive - g.skku.edu/문서/2023 날씨 빅데이터 
 os.chdir(new_dir)  # 현재 작업 디렉토리 변경
 current_dir = os.getcwd()
 print("현재 작업 디렉토리:", current_dir)
-
-
-# In[ ]:
 
 
 # 데이터 읽어오기
@@ -387,8 +344,6 @@ train[train == -99.9] = np.nan
 test[test == -99.9] = np.nan
 
 
-# In[ ]:
-
 
 # check missing relationship 
 msno.heatmap(train)
@@ -396,14 +351,8 @@ msno.heatmap(train)
 
 # ## 상관관계 시각화
 
-# In[ ]:
-
-
 num_train = train[['ta', 'td', 'hm', 'ws', 'rn', 're', 'ts', 'si', 'ss', 'sn']]
 num_train.corr(method='pearson')
-
-
-# In[ ]:
 
 
 plt.figure(figsize=(10, 8)) 
@@ -413,9 +362,6 @@ heatmap_num = sns.heatmap(num_train.corr(), linewidths = 0, vmax = 1, vmin = -1,
 
 
 # ## 분포 시각화 
-
-# In[ ]:
-
 
 fig, ax = plt.subplots(4, 2, figsize=(30,30)) 
 colors = sns.color_palette('Dark2', n_colors=8)
@@ -453,22 +399,13 @@ ax10.set_ylabel('Density')
 plt.show()
 
 
-# In[ ]:
-
-
 plt.figure(figsize = (7,5))
 sns.set_palette("Pastel1")
 sns.countplot(data=train,x='ww')
 plt.rc('font', size=5)
 
 
-# In[ ]:
-
-
 train['ww'].value_counts()
-
-
-# In[ ]:
 
 
 #ts에 따른 ww 시각화 
@@ -477,8 +414,6 @@ plt.set_xticklabels(['H', 'C', 'F', 'S', 'R', 'X', 'G']) # 원래 범주의 의�
 
 
 # # 데이터 보간 
-
-# In[ ]:
 
 
 from sklearn.experimental import enable_iterative_imputer
@@ -490,14 +425,8 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import BayesianRidge
 
 
-# In[ ]:
-
-
 imputer=IterativeImputer(estimator=BayesianRidge(),
                          max_iter=30,random_state=1003,verbose=True)
-
-
-# In[ ]:
 
 
 imputer=imputer.fit(train[numeric])
@@ -517,8 +446,6 @@ test2 = pd.concat([test['time'],
                    test['현천계현천'],
                    x_test_numh],axis=1)
 
-
-# In[ ]:
 
 
 train2.to_csv('지면온도train_imputed.csv',index=False)
