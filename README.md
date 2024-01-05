@@ -14,5 +14,7 @@
 ## 4. 참여자 
 성균관대학교 박시언, 김수빈, 이지윤 , 김준서, 조웅빈, 서희나
 
-## 5. 분석 플로우 차트 
+## 5. 분석 흐름
+
+![image](https://github.com/hinagumena/2023-Weather-Big-Data-Contest/assets/115136010/2b4b1310-fdd8-4681-adb3-c39078cb27a9)
 
