@@ -18,3 +18,4 @@
 
 ![image](https://github.com/hinagumena/2023-Weather-Big-Data-Contest/assets/115136010/2b4b1310-fdd8-4681-adb3-c39078cb27a9)
 
+![image](https://github.com/hinagumena/2023-Weather-Big-Data-Contest/assets/115136010/10348ce3-1174-4e07-a62d-6ca7314f1eb8)
